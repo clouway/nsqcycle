@@ -2,15 +2,18 @@ package nsqtest
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/bitly/go-nsq"
 	"gopkg.in/ory-am/dockertest.v3"
 )
 
-type Server struct {}
+type Server struct {
+	Max time.Duration
+}
 
-func NewServer() *Server {
-	return &Server{}
+func NewServer(maxBackoffInterval time.Duration) *Server {
+	return &Server{Max: maxBackoffInterval}
 }
 
 func (s *Server) Run() (*Nsq, error) {
@@ -25,23 +28,39 @@ func (s *Server) Run() (*Nsq, error) {
 		Cmd:        []string{"nsqd"},
 	}
 
-	resource := new(dockertest.Resource)
-
-	if err := pool.Retry(func() error {
-		var err error
-		resource, err = pool.RunWithOptions(options)
-
-		if err != nil {
-			return err
-		}
-
-		return nil
-	}); err != nil {
+	resource, err := pool.RunWithOptions(options)
+	if err != nil {
 		return nil, err
 	}
 
+	host := fmt.Sprintf("localhost:%s", resource.GetPort("4150/tcp"))
+
+	attempt := 1
+
+	for {
+		consumer, _ := nsq.NewConsumer("test", "ch", nsq.NewConfig())
+		consumer.AddHandler(new(fakeNSQHandler))
+		err := consumer.ConnectToNSQD(host)
+
+		if err != nil {
+			duration := time.Millisecond * time.Duration(attempt)
+
+			if duration > s.Max {
+				time.Sleep(s.Max)
+				continue
+			}
+
+			time.Sleep(duration)
+			attempt++
+			continue
+		}
+
+		consumer.Stop()
+		break
+	}
+
 	return &Nsq{
-		Host: fmt.Sprintf("localhost:%s", resource.GetPort("4150/tcp")),
+		Host: host,
 
 		pool:     pool,
 		resource: resource,
@@ -68,4 +87,10 @@ func (n *Nsq) NewConsumer(topic string, channel string, config *nsq.Config) (*ns
 func (s *Nsq) Purge() error {
 	err := s.pool.Purge(s.resource)
 	return err
+}
+
+type fakeNSQHandler struct{}
+
+func (h *fakeNSQHandler) HandleMessage(message *nsq.Message) error {
+	return nil
 }
