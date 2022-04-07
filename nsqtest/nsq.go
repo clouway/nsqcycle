@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bitly/go-nsq"
-	"gopkg.in/ory-am/dockertest.v3"
+	"github.com/nsqio/go-nsq"
+	"github.com/ory/dockertest/v3"
 )
 
 type Server struct {
